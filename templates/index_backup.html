@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {# `point` = JSON from https://api.weather.gov/points/{lat},{lon}
+     `forecast` = optional JSON from point.properties.forecast (the second NWS call)
+     `error` = optional error message string #}
+  {% set pp = point.properties if point and point.properties else none %}
+  {% set rel = pp.relativeLocation.properties if pp and pp.relativeLocation else none %}
+  <title>{% if rel %}{{ rel.city }}, {{ rel.state }} Weather{% else %}Weather{% endif %}</title>
+  <style>
+    :root {
+      --bg: #eef6fc;
+      --card: #ffffff;
+      --text: #12324f;
+      --muted: #5a7891;
+      --accent: #1f6fd6;
+      --green: #2a9d5c;
+      --border: #cfe3f2;
+      --error-bg: #fdecea;
+      --error-text: #a12622;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0a1b2c;
+        --card: #11293f;
+        --text: #ffffff;
+        --muted: #9dbbd1;
+        --accent: #5aa9ff;
+        --green: #4fd18b;
+        --border: #1f4160;
+        --error-bg: #3a1c1b;
+        --error-text: #ffb4ae;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px 16px 48px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+    }
+    main { max-width: 760px; margin: 0 auto; }
+    h1 { font-size: 1.4rem; margin: 0 0 4px; color: var(--accent); }
+    h2 { font-size: 1.05rem; margin: 28px 0 12px; color: var(--green); }
+    .sub { color: var(--muted); font-size: 0.9rem; margin: 0 0 20px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+    }
+    .stat { border-top: 2px solid var(--green); padding-top: 10px; }
+    .stat .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .stat .value { font-size: 1.05rem; font-weight: 500; word-break: break-word; }
+    .periods { display: grid; gap: 12px; }
+    .period { display: grid; grid-template-columns: 110px 1fr; gap: 4px 16px; align-items: start; }
+    .period .name { font-weight: 600; color: var(--green); }
+    .period .temp { font-size: 1.6rem; font-weight: 600; line-height: 1.1; color: var(--accent); }
+    .period .temp small { font-size: 0.9rem; color: var(--muted); font-weight: 400; }
+    .period .short { font-weight: 500; }
+    .period .detail { color: var(--muted); font-size: 0.9rem; }
+    .period .meta { color: var(--muted); font-size: 0.8rem; margin-top: 4px; }
+    .notice { color: var(--muted); font-size: 0.9rem; }
+    .error { background: var(--error-bg); color: var(--error-text); border-radius: 12px; padding: 16px 20px; }
+    footer { margin-top: 32px; text-align: center; color: var(--muted); font-size: 0.8rem; }
+    footer a { color: var(--accent); }
+    @media (max-width: 480px) {
+      .period { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  {% if error or not pp %}
+    <h1>Weather</h1>
+    <div class="error">
+      <strong>Weather data is unavailable.</strong><br>
+      {{ error if error else "No data was passed to the template." }}
+    </div>
+  {% else %}
+    <h1>{% if rel %}{{ rel.city }}, {{ rel.state }}{% else %}Weather point{% endif %}</h1>
+    <p class="sub">
+      {% if point.geometry and point.geometry.coordinates %}
+        {{ "%.4f"|format(point.geometry.coordinates[1]) }}, {{ "%.4f"|format(point.geometry.coordinates[0]) }}
+      {% endif %}
+      {% if pp.timeZone %} · {{ pp.timeZone }}{% endif %}
+    </p>
+
+    <section class="card">
+      <div class="stats">
+        {% if pp.gridId %}
+          <div class="stat"><div class="label">Forecast office</div><div class="value">{{ pp.gridId }}</div></div>
+          <div class="stat"><div class="label">Grid point</div><div class="value">{{ pp.gridX }}, {{ pp.gridY }}</div></div>
+        {% endif %}
+        {% if pp.radarStation %}
+          <div class="stat"><div class="label">Radar station</div><div class="value">{{ pp.radarStation }}</div></div>
+        {% endif %}
+        {% if rel and rel.distance and rel.distance.value is not none %}
+          <div class="stat">
+            <div class="label">Nearest town</div>
+            <div class="value">{{ (rel.distance.value / 1609.344) | round(1) }} mi from {{ rel.city }}</div>
+          </div>
+        {% endif %}
+        {% if pp.county %}
+          <div class="stat"><div class="label">County zone</div><div class="value">{{ pp.county.rsplit('/', 1)[-1] }}</div></div>
+        {% endif %}
+        {% if pp.forecastZone %}
+          <div class="stat"><div class="label">Forecast zone</div><div class="value">{{ pp.forecastZone.rsplit('/', 1)[-1] }}</div></div>
+        {% endif %}
+        {% if pp.fireWeatherZone %}
+          <div class="stat"><div class="label">Fire weather zone</div><div class="value">{{ pp.fireWeatherZone.rsplit('/', 1)[-1] }}</div></div>
+        {% endif %}
+      </div>
+    </section>
+
+    <h2>Forecast</h2>
+    {% if forecast and forecast.properties and forecast.properties.periods %}
+      <div class="periods">
+        {% for p in forecast.properties.periods %}
+          <div class="card period">
+            <div>
+              <div class="name">{{ p.name }}</div>
+              <div class="temp">{{ p.temperature }}°<small>{{ p.temperatureUnit }}</small></div>
+            </div>
+            <div>
+              <div class="short">{{ p.shortForecast }}</div>
+              <div class="detail">{{ p.detailedForecast }}</div>
+              <div class="meta">
+                Wind {{ p.windSpeed }} {{ p.windDirection }}
+                {% if p.probabilityOfPrecipitation and p.probabilityOfPrecipitation.value is not none %}
+                  · {{ p.probabilityOfPrecipitation.value }}% chance of precipitation
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+      {% if forecast.properties.updateTime %}
+        <p class="sub" style="margin-top:12px">Updated {{ forecast.properties.updateTime }}</p>
+      {% endif %}
+    {% else %}
+      <div class="card notice">
+        The points endpoint only describes the location. Pass the forecast data
+        (fetched from <code>{{ pp.forecast or "properties.forecast" }}</code>) to the
+        template as <code>forecast</code> to show the forecast here.
+      </div>
+    {% endif %}
+  {% endif %}
+
+  <footer>
+    Data from the <a href="https://www.weather.gov" target="_blank" rel="noopener">National Weather Service</a>
+  </footer>
+</main>
+</body>
+</html>
