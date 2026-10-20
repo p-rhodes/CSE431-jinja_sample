@@ -6,7 +6,7 @@ app = Flask(__name__)
 
 #Lat and Lon will be used as the location for the queries
 #I have hardcoded them to the location of Clark College (TBD)
-LAT, LON = 45.5152, -122.6784
+LAT, LON = 45.63, -122.65
 
 #NWS requires a header to be sent that signifies the request in some way
 HEADERS = {"User-Agent": "CSE431-Weather-App-Clark-College (p.rhodes@students.clark.edu)"}
