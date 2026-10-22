@@ -1,6 +1,12 @@
 import requests
 import json
 from flask import Flask, render_template
+from src.model_training.weather_predict import WeatherPredictor
+
+wp=WeatherPredictor('src/model_training/2025_weather_data.csv')
+wp.clean_data()
+wp.train()
+print('Model training complete! Starting Application...')
 
 #set app to use the current file name
 app = Flask(__name__)
