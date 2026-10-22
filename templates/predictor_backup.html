@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {# Template variables (all optional; each section degrades gracefully):
+       history   the last 10 days including today, rendered in the order given.
+                 Each item: {date, high, low, conditions?, precip?, wind?}
+                 `date` may be a datetime.date or an ISO "YYYY-MM-DD" string;
+                 `precip` and `wind` are shown exactly as given (e.g. "0.12 in", "8 mph NW")
+       today     today's date (date or ISO string); highlights that day in the history list
+       units     "F" (default) or "C", used only for the history temperatures
+       point     JSON from https://api.weather.gov/points/{lat},{lon}; used for the page title
+       forecast  JSON from point.properties.forecast; fills the NWS block
+       tomorrow  optional ISO date for "tomorrow"; derived from `forecast` when omitted
+       error     optional error message string #}
+  {% set pp = point.properties if point and point.properties else none %}
+  {% set rel = pp.relativeLocation.properties if pp and pp.relativeLocation else none %}
+  {% set u = units or 'F' %}
+
+  {# ---- Work out tomorrow's day/night periods from the NWS forecast ---- #}
+  {% set periods = forecast.properties.periods if forecast and forecast.properties and forecast.properties.periods else [] %}
+  {% set ns = namespace(first=none, tomorrow=none) %}
+  {% for p in periods %}
+    {% set d = p.startTime[:10] %}
+    {% if ns.first is none %}
+      {% set ns.first = d %}
+    {% elif ns.tomorrow is none and d != ns.first %}
+      {% set ns.tomorrow = d %}
+    {% endif %}
+  {% endfor %}
+  {% set tdate = (tomorrow | string) if tomorrow else ns.tomorrow %}
+  {% set tm = {'name': none, 'high': none, 'low': none} %}
+  {% for p in periods %}
+    {% if tdate and p.startTime[:10] == tdate %}
+      {% if p.isDaytime and tm.high is none %}
+        {% set _ = tm.update({'name': p.name, 'high': p}) %}
+      {% elif not p.isDaytime and tm.low is none %}
+        {% set _ = tm.update({'low': p}) %}
+      {% endif %}
+    {% endif %}
+  {% endfor %}
+
+  {% macro datelabel(d) -%}
+    {%- if d.strftime is defined -%}{{ d.strftime('%a, %b %d') }}{%- else -%}{{ d }}{%- endif -%}
+  {%- endmacro %}
+
+  {% macro half(label, p) %}
+    <div class="half">
+      <div class="half-label">{{ label }}</div>
+      <div class="short">{{ p.shortForecast }}</div>
+      <div class="detail">{{ p.detailedForecast }}</div>
+      <div class="meta">
+        Wind {{ p.windSpeed }} {{ p.windDirection }}
+        {% if p.probabilityOfPrecipitation and p.probabilityOfPrecipitation.value is not none %}
+          · {{ p.probabilityOfPrecipitation.value }}% chance of precipitation
+        {% endif %}
+      </div>
+    </div>
+  {% endmacro %}
+
+  <title>Weather Predictor{% if rel %} · {{ rel.city }}, {{ rel.state }}{% endif %}</title>
+  <style>
+    :root {
+      --bg: #eef6fc;
+      --card: #ffffff;
+      --text: #12324f;
+      --muted: #5a7891;
+      --accent: #1f6fd6;
+      --green: #2a9d5c;
+      --border: #cfe3f2;
+      --error-bg: #fdecea;
+      --error-text: #a12622;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0a1b2c;
+        --card: #11293f;
+        --text: #ffffff;
+        --muted: #9dbbd1;
+        --accent: #5aa9ff;
+        --green: #4fd18b;
+        --border: #1f4160;
+        --error-bg: #3a1c1b;
+        --error-text: #ffb4ae;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px 16px 48px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+    }
+    main { max-width: 1180px; margin: 0 auto; }
+    h1 { font-size: 1.4rem; margin: 0 0 4px; color: var(--accent); }
+    h2 { font-size: 1.05rem; margin: 0 0 4px; color: var(--green); }
+    .sub { color: var(--muted); font-size: 0.9rem; margin: 0 0 20px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+    }
+    .notice { color: var(--muted); font-size: 0.9rem; }
+    .error { background: var(--error-bg); color: var(--error-text); border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; }
+    footer { margin-top: 32px; text-align: center; color: var(--muted); font-size: 0.8rem; }
+    footer a { color: var(--accent); }
+
+    /* Page layout: history sidebar on the left, forecast blocks on the right */
+    .layout { display: grid; grid-template-columns: 320px 1fr; gap: 24px; align-items: start; }
+    .sidebar { position: sticky; top: 24px; }
+    .blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: stretch; }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; }
+    }
+
+    /* Past 10 days */
+    .history { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+    .hist {
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 12px;
+    }
+    .hist.today { border-left-color: var(--green); }
+    .hist-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+    .hist-date { font-weight: 600; font-size: 0.95rem; }
+    .badge {
+      margin-left: 8px; padding: 1px 7px; border-radius: 999px;
+      background: var(--green); color: var(--card);
+      font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+      vertical-align: 1px;
+    }
+    .hist-temps { font-weight: 600; white-space: nowrap; }
+    .hist-temps .hi { color: var(--accent); }
+    .hist-temps .lo { color: var(--green); }
+    .hist-temps .sep { color: var(--muted); font-weight: 400; margin: 0 2px; }
+    .hist-cond { color: var(--muted); font-size: 0.85rem; }
+    .hist-meta { color: var(--muted); font-size: 0.78rem; }
+
+    /* Forecast blocks */
+    .block { display: flex; flex-direction: column; }
+    .block-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 14px; }
+    .tag { color: var(--muted); font-size: 0.8rem; }
+    .slot { flex: 1; min-height: 220px; }
+    .slot:empty { border: 2px dashed var(--border); border-radius: 10px; }
+
+    .day-head {
+      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline;
+      gap: 8px 16px; padding-bottom: 12px; margin-bottom: 12px;
+      border-bottom: 2px solid var(--green);
+    }
+    .day-head .name { font-weight: 600; font-size: 1.1rem; color: var(--green); }
+    .range { display: flex; gap: 20px; font-size: 1.5rem; font-weight: 600; line-height: 1.1; }
+    .range small {
+      display: block; font-size: 0.7rem; font-weight: 500;
+      text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
+    }
+    .range .hi { color: var(--accent); }
+    .range .lo { color: var(--green); }
+    .halves { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    .half-label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .half .short { font-weight: 500; }
+    .half .detail { color: var(--muted); font-size: 0.9rem; }
+    .half .meta { color: var(--muted); font-size: 0.8rem; margin-top: 4px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Weather Predictor</h1>
+  <p class="sub">
+    {% if rel %}{{ rel.city }}, {{ rel.state }}{% else %}Past 10 days and tomorrow's forecast{% endif %}
+  </p>
+
+  {% if error %}
+    <div class="error"><strong>Something went wrong.</strong><br>{{ error }}</div>
+  {% endif %}
+
+  <div class="layout">
+
+    <aside class="sidebar card">
+      <h2>Past 10 Days</h2>
+      <div class="tag">Including today · temperatures in °{{ u }}</div>
+
+      {% if history %}
+        <ol class="history">
+          {% for h in history %}
+            {% set is_today = today and (h.date | string) == (today | string) %}
+            <li class="hist{% if is_today %} today{% endif %}">
+              <div class="hist-top">
+                <div class="hist-date">{{ datelabel(h.date) }}{% if is_today %}<span class="badge">Today</span>{% endif %}</div>
+                <div class="hist-temps">
+                  <span class="hi">{{ h.high if h.high is not none else '–' }}°</span><span class="sep">/</span><span class="lo">{{ h.low if h.low is not none else '–' }}°</span>
+                </div>
+              </div>
+              {% if h.conditions %}<div class="hist-cond">{{ h.conditions }}</div>{% endif %}
+              {% if h.precip or h.wind %}
+                <div class="hist-meta">
+                  {% if h.precip %}Precip {{ h.precip }}{% endif %}{% if h.precip and h.wind %} · {% endif %}{% if h.wind %}Wind {{ h.wind }}{% endif %}
+                </div>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ol>
+      {% else %}
+        <p class="notice" style="margin-top:12px">No history data was passed to the template. Pass a list of daily records as <code>history</code>.</p>
+      {% endif %}
+    </aside>
+
+    <section class="blocks">
+
+      {# Block 1: tomorrow, from the NWS API #}
+      <div class="card block">
+        <div class="block-head">
+          <h2>NWS Forecast</h2>
+          <div class="tag">Tomorrow{% if tdate %} · {{ tdate }}{% endif %}</div>
+        </div>
+
+        {% if tm.high or tm.low %}
+          <div class="day-head">
+            <div class="name">{{ tm.name or (tm.low.name if tm.low else 'Tomorrow') }}</div>
+            <div class="range">
+              {% if tm.high %}
+                <span class="hi"><small>High</small>{{ tm.high.temperature }}°{{ tm.high.temperatureUnit }}</span>
+              {% endif %}
+              {% if tm.low %}
+                <span class="lo"><small>Low</small>{{ tm.low.temperature }}°{{ tm.low.temperatureUnit }}</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="halves">
+            {% if tm.high %}{{ half('Day', tm.high) }}{% endif %}
+            {% if tm.low %}{{ half('Night', tm.low) }}{% endif %}
+          </div>
+          {% if forecast.properties.updateTime %}
+            <p class="sub" style="margin:12px 0 0">Updated {{ forecast.properties.updateTime }}</p>
+          {% endif %}
+        {% else %}
+          <p class="notice">Tomorrow's forecast isn't available. Pass the NWS forecast JSON (from the <code>forecast</code> URL in the points response) to the template as <code>forecast</code>.</p>
+        {% endif %}
+      </div>
+
+      {# Block 2: intentionally empty, to be filled with your own forecast data.
+         Put your content inside the .slot div below. #}
+      <div class="card block">
+        <div class="block-head">
+          <h2>Your Forecast</h2>
+          <div class="tag">Tomorrow</div>
+        </div>
+        <div class="slot" id="custom-forecast"></div>
+      </div>
+
+    </section>
+  </div>
+
+  <footer>
+    Forecast data from the <a href="https://www.weather.gov" target="_blank" rel="noopener">National Weather Service</a>
+  </footer>
+</main>
+</body>
+</html>
