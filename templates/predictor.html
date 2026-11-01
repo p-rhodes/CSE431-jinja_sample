@@ -13,6 +13,22 @@
        point     JSON from https://api.weather.gov/points/{lat},{lon}; used for the page title
        forecast  JSON from point.properties.forecast; fills the NWS block
        tomorrow  optional ISO date for "tomorrow"; derived from `forecast` when omitted
+       my_forecast  your own forecast for tomorrow (a dict parsed from your JSON); fills Block 2.
+                 All keys are optional:
+                   {
+                     "title": "My Model",            // block heading (default "Your Forecast")
+                     "date": "2026-10-23",           // shown next to "Tomorrow"
+                     "name": "Friday",               // card heading (default "Tomorrow")
+                     "high": 64, "low": 50,          // numbers; 0 is fine
+                     "unit": "F",                    // default "F"
+                     "day":   {"summary": "Sunny", "details": "Clear skies.",
+                               "wind": "5 mph NW", "precip_chance": 10},
+                     "night": {"summary": "Clear", "details": "...",
+                               "wind": "3 mph N",  "precip_chance": 0},
+                     "confidence": 72,               // percent
+                     "notes": "Free-text explanation",
+                     "updated": "2026-10-22T19:00:00Z"
+                   }
        error     optional error message string #}
   {% set pp = point.properties if point and point.properties else none %}
   {% set rel = pp.relativeLocation.properties if pp and pp.relativeLocation else none %}
@@ -58,6 +74,25 @@
       </div>
     </div>
   {% endmacro %}
+
+  {# One half (day or night) of the custom forecast. `d` is a dict from my_forecast. #}
+  {% macro chalf(label, d) %}
+    {% set wind = d.get('wind') %}
+    {% set pc = d.get('precip_chance') %}
+    <div class="half">
+      <div class="half-label">{{ label }}</div>
+      {% if d.get('summary') %}<div class="short">{{ d.get('summary') }}</div>{% endif %}
+      {% if d.get('details') %}<div class="detail">{{ d.get('details') }}</div>{% endif %}
+      {% if wind or pc is not none %}
+        <div class="meta">
+          {% if wind %}Wind {{ wind }}{% endif %}{% if wind and pc is not none %} · {% endif %}{% if pc is not none %}{{ pc }}% chance of precipitation{% endif %}
+        </div>
+      {% endif %}
+    </div>
+  {% endmacro %}
+
+  {% set cf = my_forecast if my_forecast else none %}
+  {% set cf_has = cf and (cf.get('high') is not none or cf.get('low') is not none or cf.get('day') or cf.get('night')) %}
 
   <title>Weather Predictor{% if rel %} · {{ rel.city }}, {{ rel.state }}{% endif %}</title>
   <style>
@@ -167,6 +202,9 @@
     .half .short { font-weight: 500; }
     .half .detail { color: var(--muted); font-size: 0.9rem; }
     .half .meta { color: var(--muted); font-size: 0.8rem; margin-top: 4px; }
+    .conf { margin: 14px 0 0; color: var(--muted); font-size: 0.85rem; }
+    .conf strong { color: var(--green); }
+    .notes { margin: 8px 0 0; color: var(--muted); font-size: 0.9rem; }
   </style>
 </head>
 <body>
@@ -244,14 +282,36 @@
         {% endif %}
       </div>
 
-      {# Block 2: intentionally empty, to be filled with your own forecast data.
-         Put your content inside the .slot div below. #}
-      <div class="card block">
+      {# Block 2: your own forecast, rendered from the `my_forecast` JSON. #}
+      <div class="card block" id="custom-forecast">
         <div class="block-head">
-          <h2>Your Forecast</h2>
-          <div class="tag">Tomorrow</div>
+          <h2>{{ (cf.get('title') if cf else none) or 'Your Forecast' }}</h2>
+          <div class="tag">Tomorrow{% if cf and cf.get('date') %} · {{ cf.get('date') }}{% endif %}</div>
         </div>
-        <div class="slot" id="custom-forecast"></div>
+
+        {% if cf_has %}
+          {% set cu = cf.get('unit') or 'F' %}
+          {% set ch = cf.get('high') %}
+          {% set cl = cf.get('low') %}
+          <div class="day-head">
+            <div class="name">{{ cf.get('name') or 'Tomorrow' }}</div>
+            <div class="range">
+              {% if ch is not none %}<span class="hi"><small>High</small>{{ ch }}°{{ cu }}</span>{% endif %}
+              {% if cl is not none %}<span class="lo"><small>Low</small>{{ cl }}°{{ cu }}</span>{% endif %}
+            </div>
+          </div>
+          <div class="halves">
+            {% if cf.get('day') %}{{ chalf('Day', cf.get('day')) }}{% endif %}
+            {% if cf.get('night') %}{{ chalf('Night', cf.get('night')) }}{% endif %}
+          </div>
+          {% if cf.get('confidence') is not none %}
+            <p class="conf">Confidence: <strong>{{ cf.get('confidence') }}%</strong></p>
+          {% endif %}
+          {% if cf.get('notes') %}<p class="notes">{{ cf.get('notes') }}</p>{% endif %}
+          {% if cf.get('updated') %}<p class="sub" style="margin:12px 0 0">Updated {{ cf.get('updated') }}</p>{% endif %}
+        {% else %}
+          <p class="notice">No custom forecast yet. Pass your forecast JSON (parsed into a dict) to the template as <code>my_forecast</code>.</p>
+        {% endif %}
       </div>
 
     </section>

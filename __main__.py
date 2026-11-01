@@ -56,10 +56,27 @@ def predict():
             "wind": "13 mph"
         }'''
         history.append(json.loads(mock_data))
+
+    #generate a mock prediction to place into our forecast block
+    prediction=wp.predict(237, 32)
+    my_forecast=json.loads('''{
+        "title": "LinearRegression Model 2025",
+        "high": "64",
+        "low": "32",
+        "unit": "F",
+        "notes": "This is mock data being used to test the Jinja HTML format"
+    }''')
+
     try:
-        return render_template("predictor.html", history=history, forecast=forecast.json())
+        return render_template(
+            "predictor.html", 
+            history=history, 
+            forecast=forecast.json(),
+            my_forecast=my_forecast)
     except:
-        return render_template("index.html", error=str(e))
+        return render_template(
+            "index.html", 
+            error=str(e))
 
 if __name__ == "__main__":
     app.run()
