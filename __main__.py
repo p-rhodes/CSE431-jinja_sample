@@ -1,7 +1,7 @@
 import requests
 import json
+from datetime import datetime, date, timedelta
 from collections import defaultdict
-from datetime import date, timedelta
 from flask import Flask, render_template
 from src.model_training.weather_predict import WeatherPredictor
 
@@ -24,8 +24,6 @@ LAT, LON = 45.63, -122.65
 end_date=date.today()
 start_date=end_date-timedelta(days=9)
 
-print(f'oldest date to query: {start_date}\ntoday: {end_date}')
-
 NOAA_HEADER = {"token": "mVpLMAcjttMghaYaCpbJYkOjXEeXucPc"}
 NOAA_URL = 'https://www.ncei.noaa.gov/cdo-web/api/v2/data'
 NOAA_PARAMS = {
@@ -38,7 +36,6 @@ NOAA_PARAMS = {
     "limit": 1000,
 }
 
-#Attempt to get the last ten days' weather by querying the NOAA api
 old_weather=requests.get(
     NOAA_URL, params=NOAA_PARAMS, headers=NOAA_HEADER, timeout=10
 )
@@ -81,45 +78,56 @@ forecast=requests.get(
     point["properties"]["forecast"], headers=HEADERS, timeout=10
 )
 forecast.raise_for_status()
+forecast=forecast.json()
 
 @app.route("/")
 def home():
     try:
-        return render_template("index.html", point=point, forecast=forecast.json())
+        return render_template("index.html", point=point, forecast=forecast)
 
     except (requests.RequestException, KeyError, ValueError) as e:
         return render_template("index.html", error=str(e))
 
 @app.route("/predict")
 def predict():
-    #generate some mock historical data to use
-    history=[]
-    for i in range(10):
-        mock_data='''{
-            "date": "2024-01-01",
-            "high": "56",
-            "low": "32",
-            "conditions": "Foggy",
-            "precip": "0.12 in",
-            "wind": "13 mph"
-        }'''
-        history.append(json.loads(mock_data))
+    #extract today's low temperature from the forecast json
+    periods=forecast["properties"]["periods"]
+    matching_period=next(
+        (
+            period for period in periods
+            if period["startTime"][:10] == end_date.isoformat()
+                and period["isDaytime"] is False
+        ),
+        None,
+    )
 
-    #generate a mock prediction to place into our forecast block
-    prediction=wp.predict(237, 32)
-    my_forecast=json.loads('''{
-        "title": "LinearRegression Model 2025",
-        "high": "64",
-        "low": "32",
+    if matching_period:
+        temperature=int(matching_period["temperature"])
+    else:
+        return render_template("predictor.html", error='Error extracting min temp for model prediction!')
+
+    #convert end_date (today's date) into a number representing the day of the year 1-365
+    date_int=datetime.strptime(end_date.isoformat(), "%Y-%m-%d").timetuple().tm_yday
+
+    #increment date_int by one to have it represent tomorrow
+    #should ideally test for last day of the year edge cases for leap and non leap year here
+    #ex. if incrementing date_int goes to 366 we would need to check if leap year or not before deciding whether to
+    #reset back to 1
+    date_int+=1
+
+    prediction=wp.predict(date_int, temperature)
+    my_forecast={ 
+        "title": "Linear Regression Model -- 2025 data Pearson Airport",
+        "high": round(prediction[0], 1), #round the prediction to one decimal place
         "unit": "F",
-        "notes": "This is mock data being used to test the Jinja HTML format"
-    }''')
+        "notes": "This result was generated based on today's low temp, as well as tomorrow's date"
+    }
 
     try:
         return render_template(
             "predictor.html", 
             history=old_weather, 
-            forecast=forecast.json(),
+            forecast=forecast,
             my_forecast=my_forecast)
     except:
         return render_template(
