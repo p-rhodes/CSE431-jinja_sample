@@ -1,3 +1,8 @@
+#THIS SCRIPT IS DEPRECATED AND NOT ACTUALLY USED
+#I used it to rough draft some of my ideas together
+#I have left it here so you can see some of the iterations
+#the project went through
+
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
