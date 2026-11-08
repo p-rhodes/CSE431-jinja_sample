@@ -1,9 +1,16 @@
 import requests
 import json
+import os
+from openai import OpenAI
 from datetime import datetime, date, timedelta
 from collections import defaultdict
 from flask import Flask, render_template
 from src.weather_predict import WeatherPredictor
+
+#ensure user has api key before wasting compute on training model
+#I went with the Groq api because it gave me free limited access
+if not os.getenv("GROQ_API_KEY"):
+    raise SystemExit("No api key! Exiting...")
 
 #Construct a WeatherPredictor object (defined in weather_predict.py)
 #and train it using the provided csv file
@@ -132,11 +139,49 @@ def predict():
 
     #have our WeatherPredictor predict tomorrow's high temp based on today's low and tomorrow's date_int
     prediction=wp.predict(date_int, temperature)
+
+    #HW11 LLM UPDATES START HERE
+    
+    #create a client connection to the groq api
+    client=OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=os.getenv("GROQ_API_KEY"),
+    )
+
+    #construct a prompt for the LLM to use as a description in our forecast
+    prompt_string=(
+        "Provide a single sentence description for the weather report"
+        "for tomorrow based on the estimated High Temperature."
+        "Since there is no data based on the actual weather, ei. rain"
+        "or sunshine, only remark on the temperature. For example,"
+        "temperatures above 75 could be described as very hot or"
+        "temperatures below 32 could be described as freezing."
+        f"The estimated temperature for tomorrow is {round(prediction[0], 1)}."
+        "In a second sentence, indicate what model was used in generating the response."
+    )
+
+    #attempt to get a response from the model
+    response=client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=[{"role": "user", "content": prompt_string}],
+        max_completion_tokens=150,
+    )
+
+    #alert the user if the model response was empty
+    #am unsure why this is happening. I think it might have to do with
+    #usage limits since this is a free api.
+    if len(response.choices[0].message.content) == 0:
+        notes_string="Model response was empty. Try waiting and refreshing."
+    #only use the model response if it actually gave us something
+    else:
+        notes_string=response.choices[0].message.content
+
+
     my_forecast={ 
-        "title": "Linear Regression Model -- 2025 data Pearson Airport",
+        "title": "Linear Regression Model -- Now Using LLM Response",
         "high": round(prediction[0], 1), #round the prediction to one decimal place
         "unit": "F",
-        "notes": "This result was generated based on today's low temp, as well as tomorrow's date"
+        "notes": notes_string,
     }
 
     #render the weather prediction page with all of the 

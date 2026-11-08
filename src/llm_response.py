@@ -1,6 +1,7 @@
 #This is a test script so I can try out a free llm api since I no have the
 #money for the claude api
 
+import os
 from openai import OpenAI
 
 if not os.getenv("GROQ_API_KEY"):
@@ -8,12 +9,13 @@ if not os.getenv("GROQ_API_KEY"):
 
 client=OpenAI(
     base_url="https://api.groq.com/openai/v1",
-    api_key=GROQ_API_KEY,
+    api_key=os.getenv("GROQ_API_KEY"),
 )
 
 response=client.chat.completions.create(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     messages=[{"role": "user", "content": "Hello!"}],
+    max_completion_tokens=150,
 )
 
 print('BEGIN LLM RESPONSE\n')
