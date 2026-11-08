@@ -3,3 +3,4 @@ requests>=2.34.2
 pandas>=3.0.6
 scikit-learn>=1.9.1
 datetime>=6.0
+openai>=3.46.0
